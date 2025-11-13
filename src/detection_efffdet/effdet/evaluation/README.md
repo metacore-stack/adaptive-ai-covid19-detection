@@ -1,7 +1,12 @@
-# Tensorflow Models Evaluation
+# Evaluation Toolkit
 
-The code in this folder has been extracted and adapted from evaluation/evaluator code at https://github.com/tensorflow/models/tree/master/research/object_detection/utils
+These modules provide the mean average precision, class-wise statistics, and summary writers used during validation of EfficientDet checkpoints.
 
-Original code is licensed Apache 2.0, Copyright Google Inc.
-https://github.com/tensorflow/models/blob/master/LICENSE
- 
+## What Lives Here
+- Dataset evaluators compatible with TFRecord inputs.
+- Matching utilities that compute overlaps, assign true positives, and gather confusion metrics.
+- Metric accumulation helpers that stream predictions across replicas before reporting aggregated values.
+
+## Provenance
+The implementation is derived from TensorFlow Object Detection evaluation utilities and remains under the Apache 2.0 license. Refer to the accompanying `LICENSE` file for the full legal text.
+

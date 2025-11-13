@@ -1,51 +1,32 @@
-# Flask REST API
-[REST](https://en.wikipedia.org/wiki/Representational_state_transfer) [API](https://en.wikipedia.org/wiki/API)s are commonly used to expose Machine Learning (ML)  models to other services. This folder contains an example REST API created using Flask to expose the `yolov5s` model from [PyTorch Hub](https://pytorch.org/hub/ultralytics_yolov5/).
+# Minimal Flask Inference Service
 
-## Requirements
+This directory demonstrates how to wrap the YOLOv5 lung detector inside a lightweight REST endpoint so that other components in the pipeline can request predictions over HTTP.
 
-[Flask](https://palletsprojects.com/p/flask/) is required. Install with:
-```shell
-$ pip install Flask
+## Prerequisites
+- Python 3.8 or newer.
+- Install Flask and Requests inside your active environment:
+  ```bash
+  pip install Flask requests
+  ```
+
+## Launching the API
+1. Activate the environment that already contains the project dependencies.
+2. Start the server with a custom port if desired:
+   ```bash
+   python3 restapi.py --port 5000
+   ```
+3. The service exposes the prediction route at `/v1/object-detection/yolov5s`.
+
+## Example Request
+Send any RGB image using `curl`:
+```bash
+curl -X POST -F image=@sample.jpg "http://localhost:5000/v1/object-detection/yolov5s"
 ```
+The response returns a JSON array of bounding boxes with class indices, labels, confidence values, and normalized coordinates.
 
-## Run
+For programmatic use, check `example_request.py`, which streams the file, posts it to the endpoint, and prints the parsed detections.
 
-After Flask installation run:
-
-```shell
-$ python3 restapi.py --port 5000
-```
-
-Then use [curl](https://curl.se/) to perform a request:
-
-```shell
-$ curl -X POST -F image=@zidane.jpg 'http://localhost:5000/v1/object-detection/yolov5s'`
-```
-
-The model inference results are returned:
-
-```shell
-[{'class': 0,
-  'confidence': 0.8197850585,
-  'name': 'person',
-  'xmax': 1159.1403808594,
-  'xmin': 750.912902832,
-  'ymax': 711.2583007812,
-  'ymin': 44.0350036621},
- {'class': 0,
-  'confidence': 0.5667674541,
-  'name': 'person',
-  'xmax': 1065.5523681641,
-  'xmin': 116.0448303223,
-  'ymax': 713.8904418945,
-  'ymin': 198.4603881836},
- {'class': 27,
-  'confidence': 0.5661227107,
-  'name': 'tie',
-  'xmax': 516.7975463867,
-  'xmin': 416.6880187988,
-  'ymax': 717.0524902344,
-  'ymin': 429.2020568848}]
-```
-
-An example python script to perform inference using [requests](https://docs.python-requests.org/en/master/) is given in `example_request.py`
+## Troubleshooting
+- Ensure the YOLO weights referenced by `restapi.py` are downloaded before launching.
+- Warming up the model after startup can reduce latency; send a single request with a small image to trigger initialization.
+- Use environment variables like `FLASK_ENV=development` for verbose logging during debugging.

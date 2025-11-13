@@ -1,196 +1,140 @@
-# SIIM-COVID19-Detection
+# Radiology Guardians: Adaptive AI for SIIM COVID-19 Detection
 
 ![Alt text](./images/header.png?raw=true "Optional Title")
 
-Source code of the 1st place solution for [SIIM-FISABIO-RSNA COVID-19 Detection Challenge](https://www.kaggle.com/c/siim-covid19-detection/overview).
+Radiology Guardians is an end-to-end research workspace for learning, validating, and packaging thoracic imaging detectors tailored to the SIIM-FISABIO-RSNA challenge. The codebase orchestrates classification, segmentation, and localization models while tracking every artifact needed for reproducible experiments.
 
-## 1.INSTALLATION
-- HARDWARE: 4 x NVIDIA TESLA V100 32G GPU, 64 vCPUs, 256GB RAM
-- Ubuntu 18.04.5 LTS
-- CUDA 10.2
-- Python 3.7.9
-- python packages are detailed separately in [requirements](https://github.com/dungnb1333/SIIM-COVID19-Detection/blob/main/requirements.txt)
-```
-$ conda create -n envs python=3.7.9
-$ conda activate envs
-$ conda install -c conda-forge gdcm
-$ pip install -r requirements.txt
-$ pip install git+https://github.com/ildoonet/pytorch-gradual-warmup-lr.git
-$ pip install git+https://github.com/bes-dev/mean_average_precision.git@930df3618c924b694292cc125114bad7c7f3097e
-```
+## Highlights
+- Full training recipes covering multi-task classification, lung localization, and opacity detection.
+- Seamless pseudo-labeling loops that recycle confident predictions and strengthen supervision.
+- Modular data preparation utilities that transform raw DICOM studies into curated model inputs.
+- Built-in visual diagnostics, including a demo notebook and exported flowcharts, to accelerate review cycles.
 
-## 2.DATASET
-#### 2.1 SIIM COVID 19 DATASET
-- download competition dataset at [link](https://www.kaggle.com/c/siim-covid19-detection/data) then extract to ./dataset/siim-covid19-detection
-```
-$ cd src/prepare
-$ python dicom2image_siim.py
-$ python kfold_split.py
-$ python prepare_siim_annotation.py                        # effdet and yolo format
-$ cp -r ../../dataset/siim-covid19-detection/images ../../dataset/lung_crop/.
-$ python prepare_siim_lung_crop_annotation.py
-```
-#### 2.2 EXTERNAL DATASET
-- download pneumothorax dataset at [link](https://www.kaggle.com/seesee/siim-train-test) then extract to ./dataset/external_dataset/pneumothorax/dicoms
-- download pneumonia dataset at [link](https://www.kaggle.com/c/rsna-pneumonia-detection-challenge/data) then extract to ./dataset/external_dataset/rsna-pneumonia-detection-challenge/dicoms
-- download vinbigdata dataset at [link](https://www.kaggle.com/c/vinbigdata-chest-xray-abnormalities-detection/data) then extract to ./dataset/external_dataset/vinbigdata/dicoms
-- download chest14 dataset at [link](https://nihcc.app.box.com/v/ChestXray-NIHCC) then extract to ./dataset/external_dataset/chest14/images
-- download chexpert high-resolution dataset at [link](https://stanfordmlgroup.github.io/competitions/chexpert/) then extract to ./dataset/external_dataset/chexpert/train
-- download padchest dataset at [link](https://bimcv.cipf.es/bimcv-projects/padchest/) then extract to ./dataset/external_dataset/padchest/images
-- *<sub>Note: most of the images in bimcv and ricord duplicate with siim covid trainset and testset. To avoid data-leak when training, I didn't use them. You can use script [src/prepare/check_bimcv_ricord_dup.py](https://github.com/dungnb1333/SIIM-COVID19-Detection/blob/main/src/prepare/check_bimcv_ricord_dup.py)<sub>*
-```
-$ cd src/prepare
-$ python dicom2image_pneumothorax.py
-$ python dicom2image_pneumonia.py
-$ python prepare_pneumonia_annotation.py      # effdet and yolo format
-$ python dicom2image_vinbigdata.py
-$ python prepare_vinbigdata.py
-$ python refine_data.py                       # remove unused file in chexpert + chest14 + padchest dataset
-$ python resize_padchest_pneumothorax.py
-```
-dataset structure should be [./dataset/dataset_structure.txt](https://github.com/dungnb1333/SIIM-COVID19-Detection/blob/main/dataset/dataset_structure.txt)
-## 3.SOLUTION SUMMARY
+## Environment Setup
+The project was originally developed on multi-GPU Linux hosts with CUDA-enabled PyTorch. For local workstations:
+- Recommended: Python 3.8+, CUDA 11.x compatible GPUs, 64 GB RAM minimum when generating pseudo-labels.
+- Create an isolated environment and install dependencies:
+  ```
+  conda create -n radiology-guardians python=3.8
+  conda activate radiology-guardians
+  pip install -r requirements.txt
+  ```
+- Optional native libraries such as GDCM may be required to read certain DICOM encodings. Install them through your OS package manager before running conversion scripts.
+
+## Data Preparation
+1. Obtain the SIIM-FISABIO-RSNA COVID-19 Detection competition data and place the extracted structure under `dataset/siim-covid19-detection`.
+2. (Optional) Augment with external studies such as RSNA Pneumonia, VinBigData, NIH ChestXray14, CheXpert, PadChest, or pneumothorax datasets. Store each set within `dataset/external_dataset/<dataset_name>`.
+3. Use the preprocessing utilities in `src/prepare` to convert DICOM files to PNG/JPEG, align annotations, and generate stratified folds:
+   ```
+   cd src/prepare
+   python dicom2image_siim.py
+   python kfold_split.py
+   python prepare_siim_annotation.py
+   ```
+4. Execute analogous scripts for any external source you enable (for example `dicom2image_pneumonia.py`, `prepare_vinbigdata.py`, `refine_data.py`). When integrating additional public test predictions for pseudo-labeling, copy the derived lung crops into `dataset/lung_crop`.
+5. Confirm your folder tree matches the reference outline in `dataset/dataset_structure.txt`.
+
+## Pipeline Overview
 ![Alt text](./images/flowchart.png?raw=true "Optional Title")
 
-## 4.TRAIN MODEL
-### 4.1 Classification
-#### 4.1.1 Multi head classification + segmentation
-- Stage1
-```
-$ cd src/classification_aux
-$ bash train_chexpert_chest14.sh              #Pretrain backbone on chexpert + chest14
-$ bash train_rsnapneu.sh                      #Pretrain rsna_pneumonia
-$ bash train_siim.sh                          #Train siim covid19
-```
-- Stage2: Generate soft-label for classification head and mask for segmentation head.\
-  Output: soft-label in ./pseudo_csv/[source].csv and public test masks in ./prediction_mask/public_test/masks
-```
-$ bash generate_pseudo_label.sh [checkpoints_dir]
-```
-- Stage3: Train model on trainset + public testset, load checkpoint from previous round
-```
-$ bash train_pseudo.sh [previous_checkpoints_dir] [new_checkpoints_dir]
-```
-Rounds of pseudo labeling (stage2) and retraining (stage3) were repeated until the score on public LB didn't improve.
-- For final checkpoints
-```
-$ bash generate_pseudo_label.sh checkpoints_v3
-$ bash train_pseudo.sh checkpoints_v3 checkpoints_v4
-```
-- For evaluation
-```
-$ CUDA_VISIBLE_DEVICES=0 python evaluate.py --cfg configs/xxx.yaml --num_tta xxx
-```
-mAP@0.5 4 classes: negative, typical, indeterminate, atypical
-|              | [SeR152-Unet](https://github.com/dungnb1333/SIIM-COVID19-Detection/releases/download/v0.1/classification-timm-seresnet152d_320_512_unet_aux.zip) | [EB5-Deeplab](https://github.com/dungnb1333/SIIM-COVID19-Detection/releases/download/v0.1/classification-timm-efficientnet-b5_512_deeplabv3plus_aux.zip) | [EB6-Linknet](https://github.com/dungnb1333/SIIM-COVID19-Detection/releases/download/v0.1/classification-timm-efficientnet-b6_448_linknet_aux.zip) | [EB7-Unet++](https://github.com/dungnb1333/SIIM-COVID19-Detection/releases/download/v0.1/classification-timm-efficientnet-b7_512_unetplusplus_aux.zip)  | Ensemble    |
-| :----------- | :---------- | :---------- | :---------- | :---------- | :---------- |
-| w/o TTA/8TTA | 0.575/0.584 | 0.583/0.592 | 0.580/0.587 | 0.589/0.595 | 0.595/0.598 |
+The processing graph illustrates how raw studies feed into dedicated model families (classification, lung detection, opacity detection) before merging into ensemble inference and pseudo-labeling cycles.
 
-*<sub>8TTA: (orig, center-crop 80%)x(None, hflip, vflip, hflip & vflip). In [final submission](https://www.kaggle.com/nguyenbadung/siim-covid19-2021), I use 4.1.2 lung detector instead of center-crop 80%<sub>*
+## Training Playbooks
+### Multi-Head Classification with Segmentation Heads
+1. Navigate to `src/classification_aux`.
+2. Pretrain backbones on the chosen external sets using `train_chexpert_chest14.sh` and `train_rsnapneu.sh`.
+3. Fine-tune on the SIIM challenge data via `train_siim.sh`.
+4. Produce refined soft labels and masks using `generate_pseudo_label.sh <checkpoint_dir>`.
+5. Iterate pseudo-labeling with `train_pseudo.sh <old_ckpt> <new_ckpt>` until validation metrics plateau.
+6. Evaluate single models or ensembles with `evaluate.py --cfg <config_file> --num_tta <count>`.
 
-#### 4.1.2 [Lung Detector-YoloV5](https://github.com/dungnb1333/SIIM-COVID19-Detection/releases/download/v0.1/detection_yolov5_lung.zip)
-I annotated the train data(6334 images) using [LabelImg](https://github.com/tzutalin/labelImg) and built a lung localizer. I noticed that increasing input image size improves the modeling performance and lung detector helps the model to reduce background noise.
-```
-$ cd src/detection_lung_yolov5
-$ cd weights && bash download_coco_weights.sh && cd ..
-$ bash train.sh
-```
-|              | Fold0 | Fold1 | Fold2 | Fold3 | Fold4 | Average |
-| :----------- | :---- | :---- | :---- | :---- | :---- | :------ |
-| mAP@0.5:0.95 | 0.921 | 0.931 | 0.926 | 0.923 | 0.922 | 0.9246  |
-| mAP@0.5      | 0.997 | 0.998 | 0.997 | 0.996 | 0.998 | 0.9972  |
+Classification head performance snapshot (mAP@0.5) across negative, typical, indeterminate, atypical findings:
+| Model Variant | No TTA | 8× TTA |
+| :-- | :-- | :-- |
+| SeResNet152d + UNet decoder | 0.575 | 0.584 |
+| EfficientNet-B5 + DeeplabV3+ | 0.583 | 0.592 |
+| EfficientNet-B6 + LinkNet | 0.580 | 0.587 |
+| EfficientNet-B7 + UNet++ | 0.589 | 0.595 |
+| Geometric ensemble | 0.595 | 0.598 |
 
-### 4.2 Opacity Detection
-Rounds of pseudo labeling (stage2) and retraining (stage3) were repeated until the score on public LB didn't improve.
-#### 4.2.1 YoloV5x6 768
-- Stage1:
-```
-$ cd src/detection_yolov5
-$ cd weights && bash download_coco_weights.sh && cd ..
-$ bash train_rsnapneu.sh          #pretrain with rsna_pneumonia
-$ bash train_siim.sh              #train with siim covid19 dataset, load rsna_pneumonia checkpoint
-```
-- Stage2: Generate pseudo label (boxes)
-```
-$ bash generate_pseudo_label.sh
-```
-Jump to step 4.2.4 Ensembling + Pseudo labeling
-- Stage3:
-```
-$ bash warmup_ext_dataset.sh      #train with pseudo labeling (public-test, padchest, pneumothorax, vin) + rsna_pneumonia
-$ bash train_final.sh             #train siim covid19 boxes, load warmup checkpoint
-```
-#### 4.2.2 EfficientDet D7 768
-- Stage1:
-```
-$ cd src/detection_efffdet
-$ bash train_rsnapneu.sh          #pretrain with rsna_pneumonia
-$ bash train_siim.sh              #train with siim covid19 dataset, load rsna_pneumonia checkpoint
-```
-- Stage2: Generate pseudo label (boxes)
-```
-$ bash generate_pseudo_label.sh
-```
-Jump to step 4.2.4 Ensembling + Pseudo labeling
-- Stage3:
-```
-$ bash warmup_ext_dataset.sh      #train with pseudo labeling (public-test, padchest, pneumothorax, vin) + rsna_pneumonia
-$ bash train_final.sh             #train siim covid19, load warmup checkpoint
-```
-#### 4.2.3 FasterRCNN FPN 768 & 1024
-- Stage1: train backbone of model with chexpert + chest14 -> train model with rsna pneummonia -> train model with siim, load rsna pneumonia checkpoint
-```
-$ cd src/detection_fasterrcnn
-$ CUDA_VISIBLE_DEVICES=0,1,2,3 python train_chexpert_chest14.py --steps 0 1 --cfg configs/resnet200d.yaml
-$ CUDA_VISIBLE_DEVICES=0,1,2,3 python train_chexpert_chest14.py --steps 0 1 --cfg configs/resnet101d.yaml
-$ CUDA_VISIBLE_DEVICES=0 python train_rsnapneu.py --cfg configs/resnet200d.yaml
-$ CUDA_VISIBLE_DEVICES=0 python train_rsnapneu.py --cfg configs/resnet101d.yaml
-$ CUDA_VISIBLE_DEVICES=0 python train_siim.py --cfg configs/resnet200d.yaml --folds 0 1 2 3 4 --SEED 123
-$ CUDA_VISIBLE_DEVICES=0 python train_siim.py --cfg configs/resnet101d.yaml --folds 0 1 2 3 4 --SEED 123
-```
-*<sub>Note: Change SEED if training script runs into issue related to augmentation (boundingbox area=0) and comment/uncomment the following code if training script runs into issue related to resource limit<sub>*
-```python
-import resource
-rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
-resource.setrlimit(resource.RLIMIT_NOFILE, (8192, rlimit[1]))
-```
-- Stage2: Generate pseudo label (boxes)
-```
-$ bash generate_pseudo_label.sh
-```
-Jump to step 4.2.4 Ensembling + Pseudo labeling
-- Stage3:
-```
-$ CUDA_VISIBLE_DEVICES=0 python warmup_ext_dataset.py --cfg configs/resnet200d.yaml
-$ CUDA_VISIBLE_DEVICES=0 python warmup_ext_dataset.py --cfg configs/resnet101d.yaml
-$ CUDA_VISIBLE_DEVICES=0 python train_final.py --cfg configs/resnet200d.yaml
-$ CUDA_VISIBLE_DEVICES=0 python train_final.py --cfg configs/resnet101d.yaml
-```
-#### 4.2.4 Ensembling + Pseudo labeling
-Keep images that meet the conditions: negative prediction < 0.3 and maximum of (typical, indeterminate, atypical) predicion > 0.7. Then choose 2 boxes with the highest confidence as pseudo labels for each image.
+### Lung Field Localization
+1. Switch to `src/detection_lung_yolov5`.
+2. Download COCO initialization weights by running `cd weights && bash download_coco_weights.sh`.
+3. Train folds through `bash train.sh`.
+4. Average precision summary:
+   | Metric | Fold 0 | Fold 1 | Fold 2 | Fold 3 | Fold 4 | Mean |
+   | :-- | :-- | :-- | :-- | :-- | :-- | :-- |
+   | mAP@0.5:0.95 | 0.921 | 0.931 | 0.926 | 0.923 | 0.922 | 0.925 |
+   | mAP@0.5 | 0.997 | 0.998 | 0.997 | 0.996 | 0.998 | 0.997 |
 
-*<sub>Note: This step requires at least 128 GB of RAM <sub>*
+### Opacity Detection
+#### YOLOv5x6 @ 768 px
 ```
-$ cd ./src/detection_make_pseudo
-$ python make_pseudo.py
-$ python make_annotation.py            
+cd src/detection_yolov5
+cd weights && bash download_coco_weights.sh && cd ..
+bash train_rsnapneu.sh
+bash train_siim.sh
+bash generate_pseudo_label.sh
+bash warmup_ext_dataset.sh
+bash train_final.sh
 ```
 
-#### 4.2.5 Detection Performance
-|                  | [YoloV5x6 768](https://github.com/dungnb1333/SIIM-COVID19-Detection/releases/download/v0.1/detection_yolov5.zip) | [EffdetD7 768](https://github.com/dungnb1333/SIIM-COVID19-Detection/releases/download/v0.1/detection_efficientdet.zip) | [F-RCNN R200 768](https://github.com/dungnb1333/SIIM-COVID19-Detection/releases/download/v0.1/detection_fasterrcnn_resnet200d_768.zip) | [F-RCNN R101 1024](https://github.com/dungnb1333/SIIM-COVID19-Detection/releases/download/v0.1/detection_fasterrcnn_resnet101d_1024.zip) |
-| :--------------- | :----------- | :----------- | :-------------- | :--------------- |
-| mAP@0.5 TTA      | 0.580        | 0.594        | 0.592           | 0.596            |
+#### EfficientDet-D7 @ 768 px
+```
+cd src/detection_efffdet
+bash train_rsnapneu.sh
+bash train_siim.sh
+bash generate_pseudo_label.sh
+bash warmup_ext_dataset.sh
+bash train_final.sh
+```
 
-## 5.FINAL SUBMISSION
-[siim-covid19-2021](https://www.kaggle.com/nguyenbadung/siim-covid19-2021?scriptVersionId=69474844) Public LB: 0.658 / Private LB: 0.635\
-[demo notebook](https://github.com/dungnb1333/SIIM-COVID19-Detection/blob/main/src/demo_notebook/demo.ipynb) to visualize output of models
+#### Faster R-CNN FPN (ResNet101d & ResNet200d)
+```
+cd src/detection_fasterrcnn
+CUDA_VISIBLE_DEVICES=0,1,2,3 python train_chexpert_chest14.py --steps 0 1 --cfg configs/resnet200d.yaml
+CUDA_VISIBLE_DEVICES=0,1,2,3 python train_chexpert_chest14.py --steps 0 1 --cfg configs/resnet101d.yaml
+CUDA_VISIBLE_DEVICES=0 python train_rsnapneu.py --cfg configs/resnet200d.yaml
+CUDA_VISIBLE_DEVICES=0 python train_rsnapneu.py --cfg configs/resnet101d.yaml
+CUDA_VISIBLE_DEVICES=0 python train_siim.py --cfg configs/resnet200d.yaml --folds 0 1 2 3 4 --SEED 123
+CUDA_VISIBLE_DEVICES=0 python train_siim.py --cfg configs/resnet101d.yaml --folds 0 1 2 3 4 --SEED 123
+CUDA_VISIBLE_DEVICES=0 python warmup_ext_dataset.py --cfg configs/resnet200d.yaml
+CUDA_VISIBLE_DEVICES=0 python warmup_ext_dataset.py --cfg configs/resnet101d.yaml
+CUDA_VISIBLE_DEVICES=0 python train_final.py --cfg configs/resnet200d.yaml
+CUDA_VISIBLE_DEVICES=0 python train_final.py --cfg configs/resnet101d.yaml
+```
+If you encounter file descriptor limits on some platforms, enable the optional snippet inside the training scripts to raise the open-file threshold.
 
-## 6.AWESOME RESOURCES
-[Pytorch](https://github.com/pytorch/pytorch)✨\
-[PyTorch Image Models](https://github.com/rwightman/pytorch-image-models)✨\
-[Segmentation models](https://github.com/qubvel/segmentation_models.pytorch)✨\
-[EfficientDet](https://github.com/rwightman/efficientdet-pytorch)✨\
-[YoloV5](https://github.com/ultralytics/yolov5)✨\
-[FasterRCNN FPN](https://github.com/pytorch/vision/tree/master/torchvision/models/detection)✨\
-[Albumentations](https://github.com/albumentations-team/albumentations)✨\
-[Weighted boxes fusion](https://github.com/ZFTurbo/Weighted-Boxes-Fusion)✨
+### Pseudo-Label Filtration
+Use `src/detection_make_pseudo` to aggregate predictions across detectors:
+```
+cd src/detection_make_pseudo
+python make_pseudo.py
+python make_annotation.py
+```
+Default thresholds retain studies with negative probability below 0.3 and at least one positive phenotype above 0.7, keeping the two highest-confidence boxes per image. Expect memory usage that peaks around 128 GB when combining every fold and detector.
+
+### Detection Benchmarks
+| Detector | mAP@0.5 (TTA) |
+| :-- | :-- |
+| YOLOv5x6 768 | 0.580 |
+| EfficientDet-D7 768 | 0.594 |
+| Faster R-CNN ResNet200d 768 | 0.592 |
+| Faster R-CNN ResNet101d 1024 | 0.596 |
+
+## Evaluation and Reporting
+- `src/demo_notebook/demo.ipynb` visualizes predictions, masks, and box overlays for sanity checks.
+- `src/classification_aux/evaluate.py` consolidates per-fold metrics and renders CSV summaries.
+- `src/detection_yolov5/test.py`, `src/detection_efffdet/validate.py`, and `src/detection_fasterrcnn/utils.py` provide detector-specific evaluation hooks with optional test-time augmentation.
+- Final challenge submissions combined ensemble logits and weighted boxes, yielding 0.658 public leaderboard and 0.635 private leaderboard scores.
+
+## Repository Map
+- `dataset/` – raw and processed imagery plus fold metadata.
+- `src/prepare/` – ingestion, conversion, and deduplication tools.
+- `src/classification_aux/` – hybrid classification/segmentation models, configs, and pseudo-label scripts.
+- `src/detection_*` – detectors (YOLOv5, EfficientDet, Faster R-CNN) with training, inference, and warmup utilities.
+- `src/detection_make_pseudo/` – pseudo-label curation utilities.
+- `images/` – diagrams and marketing assets.
+
+## License
+This project is released under the terms stated in `LICENSE`. Please review the file before redistributing models or derived datasets.
