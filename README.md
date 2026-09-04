@@ -114,13 +114,7 @@ python make_annotation.py
 ```
 Default thresholds retain studies with negative probability below 0.3 and at least one positive phenotype above 0.7, keeping the two highest-confidence boxes per image. Expect memory usage that peaks around 128 GB when combining every fold and detector.
 
-### Detection Benchmarks
-| Detector | mAP@0.5 (TTA) |
-| :-- | :-- |
-| YOLOv5x6 768 | 0.580 |
-| EfficientDet-D7 768 | 0.594 |
-| Faster R-CNN ResNet200d 768 | 0.592 |
-| Faster R-CNN ResNet101d 1024 | 0.596 |
+
 
 ## Evaluation and Reporting
 - `src/demo_notebook/demo.ipynb` visualizes predictions, masks, and box overlays for sanity checks.
